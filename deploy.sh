@@ -1,11 +1,11 @@
 #!/bin/bash
 
 echo "Build backend avec Docker..."
-#MSYS_NO_PATHCONV=1 docker run --rm \
-#  -v "/$(pwd)/backend:/app" \
-#  -w /app \
-#  maven:3.8.4-openjdk-17 \
-#  mvn clean package -DskipTests
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "/$(pwd)/backend:/app" \
+  -w /app \
+  maven:3.8.4-openjdk-17 \
+  mvn clean package -DskipTests
 
 echo "Build frontend avec Docker..."
 MSYS_NO_PATHCONV=1 docker run --rm \
