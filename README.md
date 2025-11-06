@@ -18,9 +18,9 @@ Starter kit complet pour applications web avec **Spring Boot**, **Angular** et *
    bash deploy.sh
 
 Accédez à :
-Frontend : http://localhost:4200
-Backend : http://localhost:8080
-Base de données : localhost:5432 (via client SQL)
+- Frontend : http://localhost:4200
+- Backend : http://localhost:8080
+- Base de données : localhost:5432 (via client SQL)
 
 ## Prochaines étapes
 
@@ -38,3 +38,4 @@ Base de données : localhost:5432 (via client SQL)
 
 
 Un starter cloud pour développeurs, simple, rapide et prêt à l’emploi.
+
