@@ -10,9 +10,10 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 echo "Build frontend avec Docker..."
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "/$(pwd)/frontend:/app" \
-  -w /my-app \
+  -w /app \
   node:20-alpine \
   sh -c "npm install && npm run build"
 
 echo "Lancer Docker Compose..."
+
 docker compose up --build -d   
