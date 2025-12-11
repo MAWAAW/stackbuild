@@ -1,0 +1,122 @@
+# Generated project gitignore
+
+# Secrets and environment
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+.render-info
+.netlify-info
+
+# Backend - Java/Spring
+backend/target/
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+backend/HELP.md
+backend/.idea/
+backend/*.iml
+backend/*.ipr
+backend/*.iws
+backend/out/
+backend/build/
+backend/.gradle/
+
+# Backend - Node.js
+backend/node_modules/
+backend/dist/
+backend/build/
+backend/.npm/
+backend/logs/
+backend/*.log
+backend/.pnpm-debug.log*
+
+# Backend - Python
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/.Python
+backend/venv/
+backend/env/
+backend/.venv/
+backend/pip-log.txt
+backend/pip-delete-this-directory.txt
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Frontend - Angular
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/.sass-cache/
+frontend/connect.lock
+frontend/coverage/
+frontend/libpeerconnection.log
+frontend/npm-debug.log
+frontend/yarn-error.log
+frontend/testem.log
+frontend/typings/
+
+# Frontend - React
+frontend/build/
+frontend/.cache/
+
+# Frontend - Vue
+frontend/.vscode/
+frontend/.DS_Store
+
+# Database
+db-data/
+*.sql
+*.sqlite
+*.db
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.directory
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# Build artifacts
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Netlify
+.netlify/
+
+# Misc
+.cache/
+.parcel-cache/
