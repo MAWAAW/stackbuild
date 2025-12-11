@@ -95,6 +95,13 @@ generate_package_json() {
   }
 }
 EOF
+
+    print_info "  Génération du package-lock.json..."
+
+    (
+        cd "$frontend_dir" || exit 1
+        npx --yes npm@10 install --package-lock-only >/dev/null 2>&1
+    )
 }
 
 generate_angular_json() {
@@ -403,6 +410,31 @@ bootstrapApplication(AppComponent, {
   ]
 }).catch(err => console.error(err));
 EOF
+
+    cat > "$frontend_dir/src/index.html" << 'EOF'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AngularApp</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <app-root></app-root>
+</body>
+</html>
+EOF
+
+    cat > "$frontend_dir/src/styles.css" << 'EOF'
+/* Global styles */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+EOF
+
+
 }
 
 generate_angular_services() {

@@ -54,8 +54,8 @@ services:
     networks:
       - app-network
     volumes:
-      - ./backend:/app
-      - /app/target  # Exclure le dossier target pour Maven
+      - ./backend/src:/app/src
+      - ./backend/pom.xml:/app/pom.xml
 
   # Frontend
   frontend:
@@ -195,26 +195,20 @@ get_db_volume_path() {
 get_db_env_vars() {
     case $1 in
         postgres)
-            cat << 'EOF'
-      POSTGRES_DB: appdb
-      POSTGRES_USER: appuser
-      POSTGRES_PASSWORD: changeme
-EOF
+            echo "POSTGRES_DB: appdb"
+            echo "      POSTGRES_USER: appuser"
+            echo "      POSTGRES_PASSWORD: changeme"
             ;;
         mysql)
-            cat << 'EOF'
-      MYSQL_DATABASE: appdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: changeme
-      MYSQL_ROOT_PASSWORD: rootpassword
-EOF
+            echo "      MYSQL_DATABASE: appdb"
+            echo "      MYSQL_USER: appuser"
+            echo "      MYSQL_PASSWORD: changeme"
+            echo "      MYSQL_ROOT_PASSWORD: rootpassword"
             ;;
         mongodb)
-            cat << 'EOF'
-      MONGO_INITDB_DATABASE: appdb
-      MONGO_INITDB_ROOT_USERNAME: appuser
-      MONGO_INITDB_ROOT_PASSWORD: changeme
-EOF
+            echo "      MONGO_INITDB_DATABASE: appdb"
+            echo "      MONGO_INITDB_ROOT_USERNAME: appuser"
+            echo "      MONGO_INITDB_ROOT_PASSWORD: changeme"
             ;;
     esac
 }
