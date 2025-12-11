@@ -13,7 +13,8 @@ Starter kit complet pour applications web avec **Spring Boot**, **Angular** et *
 ## Usage
 
 1. Clonez le dépôt.
-2. Lancez :
+2. Lancer un Docker Enginer (par exemple Docker Desktop sur Windows)
+3. Lancez :
    ```bash
    bash deploy.sh
 
@@ -38,4 +39,5 @@ Accédez à :
 
 
 Un starter cloud pour développeurs, simple, rapide et prêt à l’emploi.
+
 
