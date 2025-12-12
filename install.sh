@@ -205,7 +205,7 @@ install_python() {
             ;;
     esac
     
-    print_success "Python $(python3 --version) installé"
+    print_success "Python $(python --version) installé"
 }
 
 install_netlify_cli() {
@@ -218,6 +218,33 @@ install_netlify_cli() {
         print_error "Node.js/npm requis pour Netlify CLI"
         return 1
     fi
+}
+
+install_github_cli() {
+    print_info "Installation de GitHub CLI..."
+    
+    case $os in
+        linux)
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh -y
+            ;;
+        macos)
+            if check_command brew; then
+                brew install gh
+            else
+                print_error "Homebrew requis"
+                return 1
+            fi
+            ;;
+        windows)
+            print_warning "Installez GitHub CLI depuis: https://cli.github.com"
+            return 1
+            ;;
+    esac
+    
+    print_success "GitHub CLI installé"
 }
 
 main() {
@@ -257,6 +284,20 @@ main() {
         missing+=("node")
     fi
     
+    # GitHub CLI
+    if check_command gh; then
+        print_success "GitHub CLI: installé ($(gh --version | head -1))"
+    else
+        print_info "GitHub CLI: non installé (recommandé pour automatisation)"
+    fi
+    
+    # Netlify CLI
+    if check_command netlify; then
+        print_success "Netlify CLI: installé"
+    else
+        print_info "Netlify CLI: non installé (recommandé pour déploiement)"
+    fi
+    
     # Java (optionnel)
     if check_command java; then
         print_success "Java: installé ($(java --version 2>&1 | head -n 1))"
@@ -265,8 +306,8 @@ main() {
     fi
     
     # Python (optionnel)
-    if check_command python3; then
-        print_success "Python: installé ($(python3 --version))"
+    if check_command python; then
+        print_success "Python: installé ($(python --version))"
     else
         print_info "Python: non installé (optionnel pour FastAPI)"
     fi
@@ -308,13 +349,20 @@ main() {
     print_info "Installation des outils optionnels..."
     echo ""
     
-    # Netlify CLI
-    if check_command netlify; then
-        print_success "Netlify CLI: installé"
-    else
-        read -p "Installer Netlify CLI? (y/N) " -n 1 -r
+    # GitHub CLI
+    if ! check_command gh; then
+        read -p "Installer GitHub CLI (recommandé)? (Y/n) " -n 1 -r
         echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            install_github_cli
+        fi
+    fi
+    
+    # Netlify CLI
+    if ! check_command netlify; then
+        read -p "Installer Netlify CLI (recommandé)? (Y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
             install_netlify_cli
         fi
     fi
@@ -326,7 +374,10 @@ main() {
     print_info "Prochaines étapes:"
     echo "  1. Rendez deploy.sh exécutable: chmod +x deploy.sh"
     echo "  2. Créez votre premier projet: ./deploy.sh init mon-projet"
-    echo "  3. Lancez-le localement: cd generated/mon-projet && docker-compose up"
+    echo "  3. Le script vous guidera pour:"
+    echo "     - Créer le dépôt GitHub automatiquement"
+    echo "     - Déployer sur Render et Netlify"
+    echo "     - Configurer le CI/CD"
     echo ""
     print_info "Pour l'aide: ./deploy.sh help"
 }

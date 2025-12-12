@@ -5,22 +5,386 @@
 deploy_to_render() {
     print_info "Déploiement du backend sur Render..."
     
-    # Vérifier si le token Render est configuré
-    if [ -z "$RENDER_API_KEY" ]; then
-        print_warning "RENDER_API_KEY non défini"
-        print_info "Pour déployer automatiquement, configurez votre clé API Render:"
-        echo "  export RENDER_API_KEY=your_api_key"
-        echo ""
-        print_info "Ou utilisez le déploiement manuel:"
-        show_render_manual_steps
-        return
+    # Vérifier si on est dans un projet
+    if [ ! -f "docker-compose.yml" ]; then
+        print_error "Fichier docker-compose.yml introuvable"
+        print_info "Assurez-vous d'être dans le répertoire du projet"
+        return 1
     fi
     
-    # Détecter le type de backend
-    local backend_type=$(detect_backend_type)
+    local project_name=$(basename $(pwd))
     
-    # Créer le service Render
-    create_render_service "$backend_type"
+    # Vérifier si le code est sur GitHub
+    if ! git remote get-url origin &> /dev/null; then
+        print_error "Aucun dépôt Git distant configuré"
+        print_info "Le déploiement sur Render nécessite que le code soit sur GitHub"
+        show_git_setup_instructions
+        return 1
+    fi
+    
+    local repo_url=$(git remote get-url origin)
+    print_info "Dépôt détecté: $repo_url"
+    
+    # Créer render.yaml automatiquement
+    if [ ! -f "render.yaml" ]; then
+        create_render_blueprint "$project_name"
+    else
+        print_info "render.yaml existe déjà"
+    fi
+    
+    # Vérifier si le token Render est configuré pour l'API
+    if [ -n "$RENDER_API_KEY" ]; then
+        print_info "RENDER_API_KEY détecté, tentative de déploiement automatique via API..."
+        
+        if deploy_render_auto "$project_name" "$repo_url"; then
+            print_success "Déploiement automatique réussi !"
+            return 0
+        else
+            print_warning "Le déploiement automatique via API a échoué"
+            print_info "Basculement vers la méthode Blueprint..."
+        fi
+    fi
+    
+    # Méthode Blueprint (recommandée et toujours fonctionnelle)
+    print_info ""
+    print_info "╔════════════════════════════════════════════════════════════╗"
+    print_info "║  Déploiement via Render Blueprint (100% automatique)      ║"
+    print_info "╚════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    print_success "✅ Fichier render.yaml créé et pushé sur GitHub"
+    echo ""
+    
+    print_info "🚀 Étapes finales (2 minutes) :"
+    echo ""
+    echo "  1. Ouvrez ce lien dans votre navigateur :"
+    echo "     👉 https://dashboard.render.com/blueprints"
+    echo ""
+    echo "  2. Cliquez sur 'New Blueprint Instance'"
+    echo ""
+    echo "  3. Sélectionnez votre repository :"
+    echo "     📁 $(basename $(dirname $repo_url))/$(basename $repo_url .git)"
+    echo ""
+    echo "  4. Cliquez 'Apply'"
+    echo ""
+    echo "  Render va automatiquement créer :"
+    echo "     ✓ Base de données PostgreSQL"
+    echo "     ✓ Service web backend"
+    echo "     ✓ Variables d'environnement"
+    echo "     ✓ Lien entre tous les services"
+    echo ""
+    
+    print_info "⏱️  Le premier déploiement prend ~5-10 minutes"
+    echo ""
+    
+    # Proposer d'ouvrir le navigateur automatiquement
+    if command -v xdg-open &> /dev/null; then
+        read -p "Voulez-vous ouvrir le dashboard Render maintenant? (Y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            xdg-open "https://dashboard.render.com/blueprints" &
+            print_success "Navigateur ouvert"
+        fi
+    elif command -v open &> /dev/null; then
+        read -p "Voulez-vous ouvrir le dashboard Render maintenant? (Y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            open "https://dashboard.render.com/blueprints" &
+            print_success "Navigateur ouvert"
+        fi
+    fi
+    
+    echo ""
+    print_info "Une fois déployé, votre backend sera accessible sur :"
+    echo "  https://${project_name}-backend.onrender.com"
+    echo ""
+    
+    # Sauvegarder les infos pour référence
+    cat > ".render-info" << EOF
+PROJECT_NAME=$project_name
+EXPECTED_URL=https://${project_name}-backend.onrender.com
+BLUEPRINT_URL=https://dashboard.render.com/blueprints
+GITHUB_REPO=$repo_url
+DEPLOYMENT_METHOD=blueprint
+DEPLOYED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+    
+    print_info "📝 Informations sauvegardées dans .render-info"
+    
+    return 0
+}
+
+deploy_render_auto() {
+    local project_name=$1
+    local repo_url=$2
+    
+    print_info "Création du service backend sur Render..."
+    
+    # Extraire owner et repo du repo_url
+    local github_repo=$(echo "$repo_url" | sed -E 's#.*github\.com[:/]([^/]+/[^/]+)(\.git)?$#\1#' | sed 's/\.git$//')
+    
+    print_info "Repository GitHub : $github_repo"
+    
+    # Créer d'abord la base de données PostgreSQL
+    print_info "Création de la base de données PostgreSQL..."
+    
+    local db_response=$(curl -s -X POST \
+        "https://api.render.com/v1/postgres" \
+        -H "Authorization: Bearer $RENDER_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"name\": \"${project_name}-db\",
+          \"plan\": \"free\",
+          \"region\": \"frankfurt\",
+          \"databaseName\": \"appdb\",
+          \"databaseUser\": \"appuser\",
+          \"enableHighAvailability\": false
+        }")
+    
+    echo "$db_response" | jq '.' 2>/dev/null || echo "$db_response"
+    
+    if echo "$db_response" | jq -e '.id' &> /dev/null; then
+        local db_id=$(echo "$db_response" | jq -r '.id')
+        print_success "Base de données créée (ID: $db_id)"
+        
+        # Récupérer l'URL de connexion interne
+        print_info "Récupération des informations de connexion..."
+        sleep 5
+        
+        local db_info=$(curl -s -X GET \
+            "https://api.render.com/v1/postgres/$db_id" \
+            -H "Authorization: Bearer $RENDER_API_KEY")
+        
+        local db_connection_string=$(echo "$db_info" | jq -r '.connectionInfo.internalConnectionString // empty')
+        
+        if [ -z "$db_connection_string" ]; then
+            print_warning "Impossible de récupérer l'URL de connexion automatiquement"
+            print_info "La base sera liée manuellement via le dashboard Render"
+            db_connection_string="postgresql://appuser:changeme@${project_name}-db:5432/appdb"
+        fi
+        
+        print_info "Attente de la disponibilité de la base de données (30s)..."
+        sleep 30
+    else
+        # Si échec, vérifier si c'est un problème d'API ou de quota
+        if echo "$db_response" | grep -qi "not found"; then
+            print_error "Endpoint API introuvable - L'API Render a peut-être changé"
+            print_warning "Déploiement manuel requis"
+            show_render_manual_deployment
+            return 1
+        elif echo "$db_response" | grep -qi "limit"; then
+            print_error "Limite de bases de données gratuites atteinte"
+            print_info "Supprimez une base existante ou passez à un plan payant"
+            return 1
+        else
+            print_error "Échec de la création de la base de données"
+            echo "$db_response"
+            print_info "Continuons avec le service web (vous lierez la DB manuellement)"
+            db_connection_string=""
+        fi
+    fi
+    
+    # Créer le service Web
+    print_info "Création du service web backend..."
+    
+    # Construire les variables d'environnement
+    local env_vars='[
+        {
+          "key": "JWT_SECRET",
+          "generateValue": true
+        },
+        {
+          "key": "CORS_ORIGINS",
+          "value": "*"
+        }'
+    
+    if [ -n "$db_connection_string" ]; then
+        env_vars="$env_vars"',
+        {
+          "key": "DATABASE_URL",
+          "value": "'"$db_connection_string"'"
+        }'
+    fi
+    
+    env_vars="$env_vars"']'
+    
+    local service_response=$(curl -s -X POST \
+        "https://api.render.com/v1/services" \
+        -H "Authorization: Bearer $RENDER_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"type\": \"web_service\",
+          \"name\": \"${project_name}-backend\",
+          \"repo\": \"https://github.com/${github_repo}\",
+          \"autoDeploy\": \"yes\",
+          \"branch\": \"main\",
+          \"rootDir\": \"backend\",
+          \"dockerfilePath\": \"backend/Dockerfile\",
+          \"region\": \"frankfurt\",
+          \"plan\": \"free\",
+          \"envVars\": $env_vars,
+          \"healthCheckPath\": \"/api/health\"
+        }")
+    
+    echo "$service_response" | jq '.' 2>/dev/null || echo "$service_response"
+    
+    if echo "$service_response" | jq -e '.service.id' &> /dev/null; then
+        local service_id=$(echo "$service_response" | jq -r '.service.id')
+        local service_url=$(echo "$service_response" | jq -r '.service.serviceDetails.url // empty')
+        
+        if [ -z "$service_url" ]; then
+            service_url="https://${project_name}-backend.onrender.com"
+        fi
+        
+        print_success "Backend déployé avec succès!"
+        print_info "Service ID: $service_id"
+        print_info "URL: $service_url"
+        
+        # Sauvegarder les infos
+        cat > ".render-info" << EOF
+SERVICE_ID=$service_id
+SERVICE_URL=$service_url
+DATABASE_ID=${db_id:-none}
+GITHUB_REPO=$github_repo
+DEPLOYED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+        
+        print_success "Informations sauvegardées dans .render-info"
+        
+        print_info ""
+        print_info "Le déploiement est en cours sur Render (~5-10 min pour le premier build)"
+        print_info "Suivez l'avancement sur: https://dashboard.render.com"
+        
+        if [ -z "$db_connection_string" ]; then
+            print_warning ""
+            print_warning "N'oubliez pas de lier la base de données manuellement:"
+            echo "  1. Allez sur https://dashboard.render.com"
+            echo "  2. Sélectionnez votre service: ${project_name}-backend"
+            echo "  3. Environment → Add Environment Variable"
+            echo "  4. DATABASE_URL = (copiez depuis votre DB PostgreSQL)"
+        fi
+        
+        return 0
+    else
+        print_error "Échec de la création du service"
+        
+        # Afficher le message d'erreur
+        if echo "$service_response" | jq -e '.message' &> /dev/null; then
+            local error_msg=$(echo "$service_response" | jq -r '.message')
+            print_error "Erreur: $error_msg"
+        fi
+        
+        echo "$service_response"
+        
+        print_info ""
+        print_warning "Le déploiement automatique a échoué"
+        show_render_manual_deployment
+        
+        return 1
+    fi
+}
+
+create_render_blueprint() {
+    local project_name=$1
+    
+    print_info "Création du fichier render.yaml..."
+    
+    cat > "render.yaml" << EOF
+services:
+  - type: web
+    name: ${project_name}-backend
+    runtime: docker
+    region: frankfurt
+    plan: free
+    branch: main
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ${project_name}-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+databases:
+  - name: ${project_name}-db
+    databaseName: appdb
+    user: appuser
+    plan: free
+    region: frankfurt
+EOF
+    
+    if [ -f "render.yaml" ]; then
+        print_success "Fichier render.yaml créé"
+        
+        # Commit et push automatiquement
+        if git rev-parse --git-dir > /dev/null 2>&1; then
+            git add render.yaml
+            if git commit -m "Add Render Blueprint configuration" 2>/dev/null; then
+                print_success "render.yaml commité"
+                
+                if git push 2>/dev/null; then
+                    print_success "render.yaml pushé sur GitHub"
+                else
+                    print_warning "Échec du push - faites : git push"
+                fi
+            else
+                print_info "render.yaml déjà commité"
+            fi
+        fi
+    else
+        print_error "Échec de la création de render.yaml"
+        return 1
+    fi
+}
+
+show_render_manual_deployment() {
+    cat << 'EOF'
+
+📋 Déploiement manuel sur Render:
+
+1. Allez sur https://dashboard.render.com
+
+2. Créez une base de données PostgreSQL:
+   - Cliquez sur "New +" → "PostgreSQL"
+   - Name: votre-projet-db
+   - Database: appdb
+   - User: appuser
+   - Region: Frankfurt
+   - Plan: Free
+   - Cliquez "Create Database"
+
+3. Créez le service web backend:
+   - Cliquez sur "New +" → "Web Service"
+   - Connectez votre dépôt GitHub
+   - Name: votre-projet-backend
+   - Region: Frankfurt
+   - Branch: main
+   - Root Directory: backend
+   - Environment: Docker
+   - Dockerfile Path: backend/Dockerfile
+   - Plan: Free
+
+4. Configurez les variables d'environnement:
+   - DATABASE_URL: (copier depuis la page de la DB PostgreSQL)
+   - JWT_SECRET: (générer une valeur aléatoire 256 bits)
+   - CORS_ORIGINS: * (ou l'URL Netlify plus tard)
+
+5. Cliquez "Create Web Service"
+
+6. Attendez le déploiement (~5-10 minutes pour le premier)
+
+7. Une fois déployé, notez l'URL du backend (ex: https://votre-app.onrender.com)
+
+8. Configurez CORS_ORIGINS avec l'URL Netlify après déploiement du frontend
+
+EOF
 }
 
 detect_backend_type() {

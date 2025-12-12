@@ -1,1 +1,11 @@
-node_modules/
+# Credentials locaux
+.env
+.env.local
+
+# Projets générés
+generated/
+
+# Infos de déploiement
+.render-info
+.netlify-info
+.github-info

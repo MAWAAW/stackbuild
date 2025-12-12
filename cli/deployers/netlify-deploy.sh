@@ -5,27 +5,177 @@
 deploy_to_netlify() {
     print_info "Déploiement du frontend sur Netlify..."
     
+    # Vérifier qu'on est dans un projet
+    if [ ! -f "docker-compose.yml" ]; then
+        print_error "Fichier docker-compose.yml introuvable"
+        return 1
+    fi
+    
+    local project_name=$(basename $(pwd))
+    
     # Vérifier si netlify-cli est installé
     if ! command -v netlify &> /dev/null; then
         print_warning "Netlify CLI n'est pas installé"
-        print_info "Installation de Netlify CLI..."
-        npm install -g netlify-cli
+        
+        read -p "Installer Netlify CLI maintenant? (Y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Installation de Netlify CLI..."
+            npm install -g netlify-cli
+            print_success "Netlify CLI installé"
+        else
+            show_netlify_manual_steps
+            return 1
+        fi
     fi
     
     # Vérifier l'authentification
-    if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+    if ! netlify status &> /dev/null 2>&1; then
         print_info "Authentification Netlify requise..."
         netlify login
     fi
     
     # Détecter le type de frontend
     local frontend_type=$(detect_frontend_type)
+    print_info "Frontend détecté: $frontend_type"
     
-    # Build le frontend
-    build_frontend "$frontend_type"
+    # Récupérer l'URL du backend si disponible
+    local backend_url=""
+    if [ -f ".render-info" ]; then
+        source .render-info
+        backend_url="$SERVICE_URL"
+        print_info "Backend URL: $backend_url"
+    else
+        print_warning "Backend URL non trouvée, utilisation de localhost"
+        backend_url="http://localhost:8080"
+    fi
+    
+    # Build le frontend avec la bonne URL d'API
+    build_frontend_with_env "$frontend_type" "$backend_url"
     
     # Déployer sur Netlify
-    deploy_frontend "$frontend_type"
+    deploy_frontend_auto "$frontend_type" "$project_name"
+}
+
+build_frontend_with_env() {
+    local frontend_type=$1
+    local backend_url=$2
+    
+    print_info "Build du frontend avec API URL: $backend_url..."
+    
+    cd frontend
+    
+    # Créer le fichier .env pour le build
+    cat > .env << EOF
+VITE_API_URL=${backend_url}/api
+REACT_APP_API_URL=${backend_url}/api
+VUE_APP_API_URL=${backend_url}/api
+EOF
+    
+    # Installer les dépendances si nécessaire
+    if [ ! -d "node_modules" ]; then
+        print_info "Installation des dépendances..."
+        npm install
+    fi
+    
+    # Build selon le type
+    print_info "Build en cours..."
+    case $frontend_type in
+        angular)
+            npm run build -- --configuration production
+            ;;
+        react)
+            npm run build
+            ;;
+        vue)
+            npm run build
+            ;;
+    esac
+    
+    if [ $? -eq 0 ]; then
+        print_success "Build réussi"
+        
+        # Afficher le contenu de dist pour debug
+        print_info "Contenu du dossier dist:"
+        ls -la dist/
+        
+        if [ -d "dist" ]; then
+            print_info "Sous-dossiers de dist:"
+            find dist -type d -maxdepth 2
+        fi
+    else
+        print_error "Échec du build"
+        cd ..
+        return 1
+    fi
+    
+    cd ..
+}
+
+deploy_frontend_auto() {
+    local frontend_type=$1
+    local project_name=$2
+    
+    print_info "Déploiement automatique sur Netlify..."
+    
+    cd frontend
+    
+    # Déterminer le dossier de build
+    local build_dir=$(get_build_directory "$frontend_type")
+    
+    if [ ! -d "$build_dir" ]; then
+        print_error "Dossier de build introuvable: $build_dir"
+        cd ..
+        return 1
+    fi
+    
+    print_info "Dossier de build: $build_dir"
+    
+    # Déployer avec création automatique du site
+    print_info "Déploiement en cours..."
+    
+    local deploy_output=$(netlify deploy --prod --dir="$build_dir" --json 2>&1)
+    
+    if echo "$deploy_output" | jq -e '.site_id' &> /dev/null; then
+        local site_id=$(echo "$deploy_output" | jq -r '.site_id')
+        local deploy_url=$(echo "$deploy_output" | jq -r '.deploy_url')
+        local site_url=$(echo "$deploy_output" | jq -r '.url')
+        
+        print_success "Frontend déployé avec succès!"
+        print_info "Site ID: $site_id"
+        print_info "Deploy URL: $deploy_url"
+        print_info "Site URL: $site_url"
+        
+        # Sauvegarder les infos
+        cat >> "../.netlify-info" << EOF
+NETLIFY_SITE_ID=$site_id
+NETLIFY_URL=$site_url
+DEPLOY_URL=$deploy_url
+DEPLOYED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+        
+        print_success "Informations sauvegardées dans .netlify-info"
+        
+        # Mettre à jour CORS du backend si possible
+        update_backend_cors "$site_url"
+        
+        # Instructions pour GitHub Actions
+        print_info ""
+        print_info "Pour GitHub Actions, configurez ces secrets:"
+        echo "  gh secret set NETLIFY_AUTH_TOKEN"
+        echo "  gh secret set NETLIFY_SITE_ID --body=\"$site_id\""
+        echo "  gh secret set API_URL --body=\"\$SERVICE_URL/api\""
+        
+    else
+        print_error "Échec du déploiement"
+        echo "$deploy_output"
+        
+        # Essayer sans --json pour avoir plus de détails
+        print_info "Nouvelle tentative avec plus de détails..."
+        netlify deploy --prod --dir="$build_dir"
+    fi
+    
+    cd ..
 }
 
 detect_frontend_type() {
@@ -149,9 +299,38 @@ get_build_directory() {
     
     case $frontend_type in
         angular)
-            # Angular met les fichiers dans dist/[project-name]/browser
-            local project_name=$(cat angular.json | jq -r '.projects | keys[0]')
-            echo "dist/$project_name/browser"
+            # Méthode 1 : Chercher dist/*/browser avec find
+            local browser_dir=$(find dist -type d -name "browser" 2>/dev/null | head -1)
+            if [ -n "$browser_dir" ] && [ -d "$browser_dir" ]; then
+                echo "$browser_dir"
+                return 0
+            fi
+            
+            # Méthode 2 : Lire angular.json
+            if [ -f "angular.json" ]; then
+                local project_name=$(grep -oP '"projects"\s*:\s*\{[^}]*"([^"]+)"' angular.json | grep -oP '"[^"]+"' | sed -n '2p' | tr -d '"')
+                if [ -n "$project_name" ] && [ -d "dist/$project_name/browser" ]; then
+                    echo "dist/$project_name/browser"
+                    return 0
+                fi
+            fi
+            
+            # Méthode 3 : Parcourir dist/*/browser
+            for dir in dist/*/browser; do
+                if [ -d "$dir" ]; then
+                    echo "$dir"
+                    return 0
+                fi
+            done
+            
+            # Fallback : dist/browser (Angular standalone)
+            if [ -d "dist/browser" ]; then
+                echo "dist/browser"
+                return 0
+            fi
+            
+            # Dernier recours
+            echo "dist"
             ;;
         react)
             echo "build"
