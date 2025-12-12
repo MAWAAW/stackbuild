@@ -17,7 +17,6 @@ echo -e "${BLUE}"
 cat << "EOF"
 ╔══════════════════════════════════════╗
 ║   Configuration des Credentials      ║
-║   Web Stack CLI                      ║
 ╚══════════════════════════════════════╝
 EOF
 echo -e "${NC}"
