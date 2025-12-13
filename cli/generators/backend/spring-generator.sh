@@ -191,17 +191,12 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-  
-  security:
-    user:
-      name: admin
-      password: admin
 
 server:
   port: ${PORT:8080}
   error:
-    include-message: always
-    include-binding-errors: always
+    include-message: never
+    include-binding-errors: never
 
 # JWT Configuration
 jwt:
@@ -401,6 +396,316 @@ public class JwtUtil {
 EOF
     
     print_success "  Classes d'authentification JWT générées"
+
+    generate_security_config "$src_dir" "$package_name"
+    generate_jwt_filter "$src_dir" "$package_name"
+    generate_auth_entrypoint "$src_dir" "$package_name"
+    generate_user_details_service "$src_dir" "$package_name"
+    generate_user_entity "$src_dir" "$package_name"
+    generate_role_enum "$src_dir" "$package_name"
+    generate_user_repository "$src_dir" "$package_name"
+    generate_auth_controller "$src_dir" "$package_name"
+}
+
+generate_security_config() {
+  local src_dir=$1
+  local package_name=$2
+
+  cat > "$src_dir/security/SecurityConfig.java" << EOF
+package $package_name.security;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@EnableMethodSecurity(prePostEnabled = true)
+public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtFilter;
+    private final AuthEntryPoint authEntryPoint;
+
+    public SecurityConfig(JwtAuthenticationFilter jwtFilter,
+                          AuthEntryPoint authEntryPoint) {
+        this.jwtFilter = jwtFilter;
+        this.authEntryPoint = authEntryPoint;
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .cors(cors -> {})
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .exceptionHandling(ex ->
+                ex.authenticationEntryPoint(authEntryPoint)
+            )
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(
+                    "/api/health",
+                    "/api/auth/**"
+                ).permitAll()
+                .anyRequest().authenticated()
+            );
+
+        http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
+    }
+}
+EOF
+}
+
+generate_jwt_filter() {
+  local src_dir=$1
+  local package_name=$2
+
+  cat > "$src_dir/security/JwtAuthenticationFilter.java" << EOF
+package $package_name.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final JwtUtil jwtUtil;
+    private final UserDetailsServiceImpl userDetailsService;
+
+    public JwtAuthenticationFilter(JwtUtil jwtUtil,
+                                   UserDetailsServiceImpl userDetailsService) {
+        this.jwtUtil = jwtUtil;
+        this.userDetailsService = userDetailsService;
+    }
+
+    @Override
+    protected void doFilterInternal(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain
+    ) throws ServletException, IOException {
+
+        final String authHeader = request.getHeader("Authorization");
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        String jwt = authHeader.substring(7);
+        String username = jwtUtil.extractUsername(jwt);
+
+        if (username != null &&
+            SecurityContextHolder.getContext().getAuthentication() == null) {
+
+            UserDetails userDetails =
+                userDetailsService.loadUserByUsername(username);
+
+            if (jwtUtil.validateToken(jwt, userDetails)) {
+                UsernamePasswordAuthenticationToken authToken =
+                    new UsernamePasswordAuthenticationToken(
+                        userDetails, null, userDetails.getAuthorities()
+                    );
+
+                authToken.setDetails(
+                    new WebAuthenticationDetailsSource().buildDetails(request)
+                );
+
+                SecurityContextHolder.getContext().setAuthentication(authToken);
+            }
+        }
+
+        filterChain.doFilter(request, response);
+    }
+}
+EOF
+}
+
+generate_auth_entrypoint() {
+  local src_dir=$1
+  local package_name=$2
+
+  cat > "$src_dir/security/AuthEntryPoint.java" << EOF
+package $package_name.security;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+@Component
+public class AuthEntryPoint implements AuthenticationEntryPoint {
+
+    @Override
+    public void commence(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            AuthenticationException authException
+    ) throws IOException {
+        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+    }
+}
+EOF
+}
+
+generate_user_details_service() {
+  local src_dir=$1
+  local package_name=$2
+
+  cat > "$src_dir/security/UserDetailsServiceImpl.java" << EOF
+package $package_name.security;
+
+import org.springframework.security.core.userdetails.*;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+
+    @Override
+    public UserDetails loadUserByUsername(String username)
+            throws UsernameNotFoundException {
+
+        throw new UsernameNotFoundException("User not found");
+    }
+}
+EOF
+}
+
+generate_role_enum() {
+cat > "$1/model/Role.java" << EOF
+package $2.model;
+
+public enum Role {
+    USER,
+    ADMIN
+}
+EOF
+}
+
+generate_user_entity() {
+cat > "$1/model/User.java" << EOF
+package $2.model;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+@Entity
+@Table(name = "users")
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true, nullable = false)
+    private String username;
+
+    @Column(nullable = false)
+    private String password;
+
+    @Enumerated(EnumType.STRING)
+    private Role role;
+}
+EOF
+}
+
+generate_user_repository() {
+cat > "$1/repository/UserRepository.java" << EOF
+package $2.repository;
+
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import $2.model.User;
+
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByUsername(String username);
+}
+EOF
+}
+
+generate_auth_controller() {
+cat > "$1/controller/AuthController.java" << EOF
+package $2.controller;
+
+import $2.security.JwtUtil;
+import $2.repository.UserRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
+    private final UserRepository repo;
+    private final PasswordEncoder encoder;
+    private final JwtUtil jwt;
+
+    public AuthController(UserRepository repo,
+                          PasswordEncoder encoder,
+                          JwtUtil jwt) {
+        this.repo = repo;
+        this.encoder = encoder;
+        this.jwt = jwt;
+    }
+
+    @PostMapping("/login")
+    public String login(@RequestParam String username,
+                        @RequestParam String password) {
+
+        var user = repo.findByUsername(username)
+            .orElseThrow(() -> new RuntimeException("Bad credentials"));
+
+        if (!encoder.matches(password, user.getPassword())) {
+            throw new RuntimeException("Bad credentials");
+        }
+
+        return jwt.generateToken(
+            org.springframework.security.core.userdetails.User
+                .withUsername(user.getUsername())
+                .password(user.getPassword())
+                .roles(user.getRole().name())
+                .build()
+        );
+    }
+}
+EOF
 }
 
 generate_spring_dockerfile() {
