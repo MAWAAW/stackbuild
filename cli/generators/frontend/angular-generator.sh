@@ -12,31 +12,14 @@ generate_frontend() {
     
     print_info "  Création de la structure Angular..."
     
-    # Créer la structure Angular
     create_angular_structure "$frontend_dir"
-    
-    # Générer package.json
     generate_package_json "$frontend_dir" "$project_name"
-    
-    # Générer angular.json
     generate_angular_json "$frontend_dir" "$project_name"
-    
-    # Générer tsconfig
     generate_tsconfig "$frontend_dir"
-    
-    # Générer les composants
     generate_angular_components "$frontend_dir"
-    
-    # Générer les services
     generate_angular_services "$frontend_dir"
-    
-    # Générer Dockerfile
     generate_angular_dockerfile "$frontend_dir"
-    
-    # Générer netlify.toml
     generate_netlify_config "$frontend_dir"
-    
-    # Générer .env.example
     generate_frontend_env "$frontend_dir"
     
     print_success "  Frontend Angular généré"

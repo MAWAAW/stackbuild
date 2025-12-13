@@ -19,7 +19,7 @@ generate_backend() {
     generate_spring_dockerfile "$backend_dir"
     generate_backend_env "$backend_dir"
     
-    print_success "  Backend Spring Boot sécurisé généré"
+    print_success "  Backend Spring Boot généré"
 }
 
 create_maven_structure() {
