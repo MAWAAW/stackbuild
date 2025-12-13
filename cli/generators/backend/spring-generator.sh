@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Générateur de backend Spring Boot avec JWT
+# Générateur de backend Spring Boot sécurisé avec JWT
 
 generate_backend() {
     local project_dir=$1
@@ -12,25 +12,14 @@ generate_backend() {
     
     print_info "  Création de la structure Spring Boot..."
     
-    # Créer la structure Maven
     create_maven_structure "$backend_dir" "$project_name"
-    
-    # Générer pom.xml
     generate_pom_xml "$backend_dir" "$project_name"
-    
-    # Générer application.yml
     generate_application_yml "$backend_dir"
-    
-    # Générer les classes Java
     generate_java_classes "$backend_dir" "$project_name" "$auth_enabled"
-    
-    # Générer Dockerfile
     generate_spring_dockerfile "$backend_dir"
-    
-    # Générer .env.example
     generate_backend_env "$backend_dir"
     
-    print_success "  Backend Spring Boot généré"
+    print_success "  Backend Spring Boot sécurisé généré"
 }
 
 create_maven_structure() {
@@ -207,7 +196,7 @@ jwt:
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:4200,http://localhost:3000}
   allowed-methods: GET,POST,PUT,DELETE,OPTIONS
-  allowed-headers: "*"
+  allowed-headers: Authorization,Content-Type
   exposed-headers: Authorization
   allow-credentials: true
   max-age: 3600
@@ -216,9 +205,7 @@ cors:
 logging:
   level:
     root: INFO
-    com.example: DEBUG
-    org.springframework.web: DEBUG
-    org.springframework.security: DEBUG
+    com.example: INFO
 EOF
 }
 
@@ -589,17 +576,30 @@ generate_user_details_service() {
   cat > "$src_dir/security/UserDetailsServiceImpl.java" << EOF
 package $package_name.security;
 
+import $package_name.model.User;
+import $package_name.repository.UserRepository;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.stereotype.Service;
 
 @Service
 public class UserDetailsServiceImpl implements UserDetailsService {
 
-    @Override
-    public UserDetails loadUserByUsername(String username)
-            throws UsernameNotFoundException {
+    private final UserRepository userRepository;
 
-        throw new UsernameNotFoundException("User not found");
+    public UserDetailsServiceImpl(UserRepository repo) {
+        this.userRepository = repo;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        return org.springframework.security.core.userdetails.User
+                .withUsername(user.getUsername())
+                .password(user.getPassword())
+                .roles(user.getRole().name())
+                .build();
     }
 }
 EOF
@@ -666,6 +666,8 @@ package $2.controller;
 
 import $2.security.JwtUtil;
 import $2.repository.UserRepository;
+import jakarta.validation.Valid;
+import lombok.Data;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -677,32 +679,34 @@ public class AuthController {
     private final PasswordEncoder encoder;
     private final JwtUtil jwt;
 
-    public AuthController(UserRepository repo,
-                          PasswordEncoder encoder,
-                          JwtUtil jwt) {
+    public AuthController(UserRepository repo, PasswordEncoder encoder, JwtUtil jwt) {
         this.repo = repo;
         this.encoder = encoder;
         this.jwt = jwt;
     }
 
     @PostMapping("/login")
-    public String login(@RequestParam String username,
-                        @RequestParam String password) {
+    public String login(@Valid @RequestBody LoginRequest loginRequest) {
+        var user = repo.findByUsername(loginRequest.getUsername())
+                .orElseThrow(() -> new RuntimeException("Bad credentials"));
 
-        var user = repo.findByUsername(username)
-            .orElseThrow(() -> new RuntimeException("Bad credentials"));
-
-        if (!encoder.matches(password, user.getPassword())) {
+        if (!encoder.matches(loginRequest.getPassword(), user.getPassword())) {
             throw new RuntimeException("Bad credentials");
         }
 
         return jwt.generateToken(
-            org.springframework.security.core.userdetails.User
-                .withUsername(user.getUsername())
-                .password(user.getPassword())
-                .roles(user.getRole().name())
-                .build()
+                org.springframework.security.core.userdetails.User
+                        .withUsername(user.getUsername())
+                        .password(user.getPassword())
+                        .roles(user.getRole().name())
+                        .build()
         );
+    }
+
+    @Data
+    static class LoginRequest {
+        private String username;
+        private String password;
     }
 }
 EOF
